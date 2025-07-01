@@ -1,0 +1,14 @@
+{
+  "properties": [
+    {
+      "name": "spring.redis.redisson.config",
+      "type": "java.lang.String",
+      "description": "Description for spring.redis.redisson.config."
+    },
+    {
+      "name": "spring.redis.redisson.file",
+      "type": "java.lang.String",
+      "description": "Description for spring.redis.redisson.file."
+    }
+  ]
+}

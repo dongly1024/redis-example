@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: redis-example
+  redis:
+    redisson:
+      file: classpath:redisson.yaml
