@@ -11,14 +11,13 @@ import org.redisson.api.stream.StreamAddArgs;
 import org.redisson.api.stream.StreamCreateGroupArgs;
 import org.redisson.api.stream.StreamReadGroupArgs;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 
 @Slf4j
-public class StreamTests extends RedisApplicationTests {
+public class StreamTests2 extends RedisApplicationTests {
 
     String consumerGroupName = "consumer-group";
     String consumerName1 = "consumer-1";
@@ -62,13 +61,14 @@ public class StreamTests extends RedisApplicationTests {
             // 读取未确认的消息
             Map<StreamMessageId, Map<Object, Object>> idMapMap = stream
                     .readGroup(consumerGroupName, consumerName, readGroupArgs);
-            if (readGroup(stream, idMapMap)) {
+            if (readGroupNoAck(stream, idMapMap)) {
                 continue;
             }
             PendingResult pendingInfo = stream.getPendingInfo(consumerGroupName);
             long total = pendingInfo.getTotal();
             if (total > 0) {
-                idMapMap = stream.readGroup(consumerGroupName, consumerName, StreamReadGroupArgs.greaterThan(new StreamMessageId(0, 0)).count(1));
+                // 重复消费问题
+                idMapMap = stream.pendingRange(consumerGroupName, StreamMessageId.MIN, StreamMessageId.MAX, 2);
                 if (readGroup(stream, idMapMap)) {
                     continue;
                 }
@@ -85,6 +85,18 @@ public class StreamTests extends RedisApplicationTests {
             log.info("readGroup: id = {}, value = {}", entry.getKey(), entry.getValue());
             // 消费完要ack
             stream.ack(consumerGroupName, entry.getKey());
+            stream.remove(entry.getKey());
+        }
+        return true;
+    }
+
+    boolean readGroupNoAck(RStream<Object, Object> stream, Map<StreamMessageId, Map<Object, Object>> idMapMap) {
+        if (idMapMap.isEmpty()) {
+            return false;
+        }
+        for (Map.Entry<StreamMessageId, Map<Object, Object>> entry : idMapMap.entrySet()) {
+            log.info("readGroupNoAck: id = {}, value = {}", entry.getKey(), entry.getValue());
+            // 消费完要ack
         }
         return true;
     }
