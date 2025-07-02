@@ -18,6 +18,7 @@ class RedisMapTests extends RedisApplicationTests {
         Thread.startVirtualThread(() -> {
             log.info("11111111");
         }).join();
+
     }
 
 }

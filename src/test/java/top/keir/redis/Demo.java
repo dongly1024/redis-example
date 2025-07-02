@@ -2,6 +2,7 @@ package top.keir.redis;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
+import org.springframework.util.AntPathMatcher;
 
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
@@ -29,6 +30,7 @@ public class Demo {
         System.out.println("task1.get() = " + task1.get());
         System.out.println("task0.get() = " + task0.get());
         System.out.println(" = ");
+        AntPathMatcher antPathMatcher = new AntPathMatcher();
     }
 
 }
