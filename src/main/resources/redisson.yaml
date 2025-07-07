@@ -9,7 +9,7 @@ singleServerConfig:
   password: redis666
   subscriptionsPerConnection: 5
   clientName: null
-  address: "redis://192.168.236.128:6379"
+  address: "redis://ubuntu:6379"
   subscriptionConnectionMinimumIdleSize: 1
   subscriptionConnectionPoolSize: 50
   connectionMinimumIdleSize: 24

@@ -1,114 +1,128 @@
 package top.keir.redis;
 
 import lombok.extern.slf4j.Slf4j;
+import org.dromara.hutool.core.collection.CollUtil;
 import org.junit.jupiter.api.Test;
-import org.redisson.api.PendingResult;
 import org.redisson.api.RStream;
-import org.redisson.api.StreamConsumer;
 import org.redisson.api.StreamGroup;
 import org.redisson.api.StreamMessageId;
 import org.redisson.api.stream.StreamAddArgs;
 import org.redisson.api.stream.StreamCreateGroupArgs;
 import org.redisson.api.stream.StreamReadGroupArgs;
+import org.redisson.client.codec.StringCodec;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.FutureTask;
+import java.util.Objects;
 
+/**
+ * @see StreamMessageId#NEVER_DELIVERED 从下一个未消费的消息开始,
+ * 其他值，是从pending-list中获取已消费未确认的消息
+ */
 @Slf4j
 public class StreamTests extends RedisApplicationTests {
+    String g1 = "g01";
+    String c1 = "c01";
+    String c2 = "c02";
+    String s1 = "s01";
 
-    String consumerGroupName = "consumer-group";
-    String consumerName1 = "consumer-1";
-    String consumerName2 = "consumer-2";
+    private RStream<String, String> getStream() {
+        return redissonClient.getStream(s1, StringCodec.INSTANCE);
+    }
 
+    /**
+     * 添加数据
+     */
     @Test
-    void test() throws InterruptedException, ExecutionException {
-        RStream<Object, Object> stream = redissonClient.getStream("stream:comment");
-        // 增加数据
+    void addMessage() {
         for (int i = 0; i < 5; i++) {
-            StreamAddArgs<Object, Object> entry = StreamAddArgs.entries("a", "a" + i, "b", "b" + i);
-            stream.add(entry);
-        }
-
-        // 创建消费组
-        createGroup(stream);
-
-        // 创建消费者
-        createConsumer(stream);
-
-        // 消费
-        FutureTask<Boolean> task0 = new FutureTask<>(() -> {
-            consumer(stream, consumerName1);
-            return true;
-        });
-        FutureTask<Boolean> task1 = new FutureTask<>(() -> {
-            consumer(stream, consumerName2);
-            return true;
-        });
-        Thread.ofVirtual().start(task0);
-        Thread.ofVirtual().start(task1);
-        task0.get();
-        task1.get();
-    }
-
-
-    void consumer(RStream<Object, Object> stream, String consumerName) {
-        while (true) {
-            StreamReadGroupArgs readGroupArgs = StreamReadGroupArgs.neverDelivered();
-            readGroupArgs.count(1);
-            // 读取未确认的消息
-            Map<StreamMessageId, Map<Object, Object>> idMapMap = stream
-                    .readGroup(consumerGroupName, consumerName, readGroupArgs);
-            if (readGroup(stream, idMapMap)) {
-                continue;
-            }
-            PendingResult pendingInfo = stream.getPendingInfo(consumerGroupName);
-            long total = pendingInfo.getTotal();
-            if (total > 0) {
-                idMapMap = stream.readGroup(consumerGroupName, consumerName, StreamReadGroupArgs.greaterThan(new StreamMessageId(0, 0)).count(1));
-                if (readGroup(stream, idMapMap)) {
-                    continue;
-                }
-            }
-            break;
+            StreamAddArgs<String, String> entry = StreamAddArgs.entries("a", "a" + i, "b", "b" + i);
+            getStream().add(entry);
         }
     }
 
-    boolean readGroup(RStream<Object, Object> stream, Map<StreamMessageId, Map<Object, Object>> idMapMap) {
-        if (idMapMap.isEmpty()) {
-            return false;
-        }
-        for (Map.Entry<StreamMessageId, Map<Object, Object>> entry : idMapMap.entrySet()) {
-            log.info("readGroup: id = {}, value = {}", entry.getKey(), entry.getValue());
-            // 消费完要ack
-            stream.ack(consumerGroupName, entry.getKey());
-        }
-        return true;
-    }
-
-    private void createConsumer(RStream<Object, Object> stream) {
-        List<StreamConsumer> consumerList = stream.listConsumers(consumerGroupName);
-        if (consumerList.stream().noneMatch(consumer -> consumer.getName().equals(consumerName1))) {
-            stream.createConsumer(consumerGroupName, consumerName1);
-        }
-        if (consumerList.stream().noneMatch(consumer -> consumer.getName().equals(consumerName2))) {
-            stream.createConsumer(consumerGroupName, consumerName2);
-        }
-    }
-
-    void createGroup(RStream<Object, Object> stream) {
-        List<StreamGroup> groups = stream.listGroups();
-        if (groups.stream().anyMatch(group -> group.getName().equals(consumerGroupName))) {
+    /**
+     * 创建消费组
+     */
+    @Test
+    void createGroup() {
+        List<StreamGroup> groups = getStream().listGroups();
+        if (groups.stream().anyMatch(group -> group.getName().equals(g1))) {
             return;
         }
-        StreamCreateGroupArgs groupArgs = StreamCreateGroupArgs.name(consumerGroupName);
-        StreamMessageId messageId = new StreamMessageId(0, 0);
-        groupArgs.id(messageId);
-        stream.createGroup(groupArgs);
+        StreamCreateGroupArgs groupArgs = StreamCreateGroupArgs.name(g1);
+        groupArgs.id(StreamMessageId.ALL);
+        getStream().createGroup(groupArgs);
     }
 
+    @Test
+    void consumerNoAck() {
+        // 标识从下一个未被消费的消息开始
+        StreamReadGroupArgs readGroupArgs = StreamReadGroupArgs.neverDelivered();
+        readGroupArgs.count(1);
+        // 读取未确认的消息
+        Map<StreamMessageId, Map<String, String>> idMapMap;
+        String consumerName = c1;
+        while (CollUtil.isNotEmpty(idMapMap = getStream().readGroup(g1, consumerName, readGroupArgs))) {
+            consumerName = Objects.equals(consumerName, c1) ? c2 : c1;
+            for (Map.Entry<StreamMessageId, Map<String, String>> entry : idMapMap.entrySet()) {
+                printlnLog(entry);
+            }
+        }
+    }
+
+    @Test
+    void consumerAck() {
+        // 标识从下一个未被消费的消息开始
+        StreamReadGroupArgs readGroupArgs = StreamReadGroupArgs.neverDelivered();
+        readGroupArgs.count(1);
+        String consumerName = c1;
+        // 读取未确认的消息
+        Map<StreamMessageId, Map<String, String>> idMapMap;
+        while (CollUtil.isNotEmpty(idMapMap = getStream().readGroup(g1, consumerName, readGroupArgs))) {
+            consumerName = Objects.equals(consumerName, c1) ? c2 : c1;
+            for (Map.Entry<StreamMessageId, Map<String, String>> entry : idMapMap.entrySet()) {
+                printlnLog(entry);
+                getStream().ack(g1, entry.getKey());
+                getStream().remove(entry.getKey());
+            }
+        }
+    }
+
+    @Test
+    void consumerPendingAck() {
+        // 标识从下一个未被消费的消息开始
+        StreamReadGroupArgs readGroupArgs = StreamReadGroupArgs.greaterThan(StreamMessageId.ALL);
+        readGroupArgs.count(1);
+        // 读取未确认的消息
+        Map<StreamMessageId, Map<String, String>> idMapMap;
+        while (CollUtil.isNotEmpty(idMapMap = getStream().readGroup(g1, c1, readGroupArgs))
+                || CollUtil.isNotEmpty(idMapMap = getStream().readGroup(g1, c2, readGroupArgs))) {
+            for (Map.Entry<StreamMessageId, Map<String, String>> entry : idMapMap.entrySet()) {
+                printlnLog(entry);
+                getStream().ack(g1, entry.getKey());
+                getStream().remove(entry.getKey());
+            }
+        }
+    }
+
+    @Test
+    void consumerPendingNoAck() {
+        // 标识从下一个未被消费的消息开始
+        StreamReadGroupArgs readGroupArgs = StreamReadGroupArgs.greaterThan(StreamMessageId.ALL);
+        readGroupArgs.count(1);
+        // 读取未确认的消息
+        Map<StreamMessageId, Map<String, String>> idMapMap;
+        while (CollUtil.isNotEmpty(idMapMap = getStream().readGroup(g1, c1, readGroupArgs))
+                || CollUtil.isNotEmpty(idMapMap = getStream().readGroup(g1, c2, readGroupArgs))) {
+            for (Map.Entry<StreamMessageId, Map<String, String>> entry : idMapMap.entrySet()) {
+                printlnLog(entry);
+            }
+        }
+    }
+
+    private void printlnLog(Map.Entry<StreamMessageId, Map<String, String>> entry) {
+        log.info("readGroup: id = {}, value = {}", entry.getKey(), entry.getValue());
+    }
 
 }
